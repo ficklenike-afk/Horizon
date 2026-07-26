@@ -5,146 +5,71 @@
     "model": "deepseek-v4-flash",
     "base_url": "https://api.deepseek.com",
     "api_key_env": "DEEPSEEK_API_KEY",
-    "temperature": 0.3,
-    "max_tokens": 8192,
-    "throttle_sec": 1,
-    "languages": [
-      "zh",
-      "en"
-    ],
-    "analysis_concurrency": 5,
-    "enrichment_concurrency": 5
+    "temperature": 0.2,
+    "max_tokens": 4096,
+    "throttle_sec": 0,
+    "languages": ["zh"],
+    "analysis_concurrency": 3,
+    "enrichment_concurrency": 2
   },
   "sources": {
-    "github": [
-      {
-        "type": "user_events",
-        "username": "karpathy",
-        "enabled": true
-      },
-      {
-        "type": "repo_releases",
-        "owner": "vllm-project",
-        "repo": "vllm",
-        "enabled": true
-      },
-      {
-        "type": "repo_releases",
-        "owner": "sgl-project",
-        "repo": "sglang",
-        "enabled": true
-      },
-      {
-        "type": "repo_releases",
-        "owner": "triton-lang",
-        "repo": "triton",
-        "enabled": true
-      }
-    ],
+    "github": [],
     "hackernews": {
-      "enabled": true,
-      "fetch_top_stories": 30,
-      "min_score": 150
+      "enabled": false,
+      "fetch_top_stories": 20,
+      "min_score": 100,
+      "category": "design-inspiration"
     },
     "rss": [
-      {
-        "name": "Simon Willison",
-        "url": "https://simonwillison.net/atom/everything/",
-        "enabled": true,
-        "category": "ai-tools"
-      },
-      {
-        "name": "GitHub Trending - Daily",
-        "url": "https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml",
-        "enabled": true,
-        "category": "github-trending"
-      },
-      {
-        "name": "Semianalysis",
-        "url": "https://newsletter.semianalysis.com/feed",
-        "enabled": true,
-        "category": "semiconductors"
-      },
-      {
-        "name": "LWN.net",
-        "url": "https://lwn.net/headlines/full_text?key=${LWN_KEY}",
-        "enabled": true,
-        "category": "linux-kernel"
-      }
+      {"name": "Global Basketball Jersey Design", "url": "https://news.google.com/rss/search?q=%22basketball+jersey%22+(design+OR+unveil+OR+%22City+Edition%22+OR+throwback)&hl=en-US&gl=US&ceid=US:en", "enabled": true, "category": "design-inspiration"},
+      {"name": "Basketball Uniform Media", "url": "https://news.google.com/rss/search?q=(site%3Abasketballjerseyarchive.com+OR+site%3Auni-watch.com+OR+site%3Anews.sportslogos.net+OR+site%3Auniswag.com)+basketball&hl=en-US&gl=US&ceid=US:en", "enabled": true, "category": "design-inspiration"},
+      {"name": "中文篮球球衣设计", "url": "https://news.google.com/rss/search?q=篮球球衣+(设计+OR+配色+OR+字体+OR+号码+OR+复古)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "design-inspiration"},
+      {"name": "篮球服采购商机", "url": "https://news.google.com/rss/search?q=(篮球服定制+OR+篮球队服采购+OR+比赛服招标)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "market-opportunity"},
+      {"name": "校园篮球商机", "url": "https://news.google.com/rss/search?q=(校园篮球赛+OR+班级篮球赛+OR+大学生篮球赛事)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "market-opportunity"},
+      {"name": "企业篮球商机", "url": "https://news.google.com/rss/search?q=(企业篮球赛+OR+员工运动会+OR+企业团建篮球)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "market-opportunity"},
+      {"name": "俱乐部赛事商机", "url": "https://news.google.com/rss/search?q=(业余篮球联赛+OR+篮球俱乐部+OR+篮球训练营+OR+赛事承办)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "market-opportunity"},
+      {"name": "篮球服材料工艺", "url": "https://news.google.com/rss/search?q=(篮球服面料+OR+吸湿速干+OR+透气网眼+OR+环保纤维)&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "supply-chain"},
+      {"name": "运动服供应链", "url": "https://news.google.com/rss/search?q=(热升华+OR+数码印花+OR+刺绣+OR+小单快反)+运动服&hl=zh-CN&gl=CN&ceid=CN:zh-Hans", "enabled": true, "category": "supply-chain"}
     ],
     "reddit": {
       "enabled": true,
       "subreddits": [
-        {
-          "subreddit": "MachineLearning",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60
-        },
-        {
-          "subreddit": "LocalLLaMA",
-          "enabled": true,
-          "sort": "hot",
-          "time_filter": "day",
-          "fetch_limit": 10,
-          "min_score": 60
-        }
+        {"subreddit": "UniWatch", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 15, "min_score": 5, "category": "design-inspiration"},
+        {"subreddit": "basketballjerseys", "enabled": true, "sort": "hot", "time_filter": "day", "fetch_limit": 15, "min_score": 5, "category": "design-inspiration"}
       ],
       "users": [],
-      "fetch_comments": 10
+      "fetch_comments": 5
     },
-    "telegram": {
-      "enabled": true,
-      "channels": [
-        {
-          "channel": "zaihuapd",
-          "enabled": true,
-          "fetch_limit": 20
-        }
-      ]
-    }
+    "telegram": {"enabled": false, "channels": []},
+    "twitter": {
+      "enabled": "${TWITTER_ENABLED}",
+      "mode": "apify",
+      "users": ["NBA", "nikebasketball", "Jumpman23", "adidasHoops", "UniWatch", "sportslogosnet", "SLAMonline"],
+      "fetch_limit": 100,
+      "category": "design-inspiration",
+      "fetch_reply_text": false,
+      "max_replies_per_tweet": 0,
+      "max_tweets_to_expand": 0,
+      "reply_min_likes": 0,
+      "lookback_hours": 72,
+      "apify_token_env": "APIFY_TOKEN",
+      "actor_id": "altimis~scweet"
+    },
+    "openbb": {"enabled": false, "watchlists": []},
+    "ossinsight": {"enabled": false, "period": "past_24_hours", "languages": ["All"], "keywords": [], "min_stars": 10, "max_items": 30, "category": "design-inspiration"},
+    "gdelt": {"enabled": true, "query": "(\"basketball jersey\" OR \"basketball uniform\") AND (design OR unveil OR branding)", "mode": "ArtList", "max_records": 25, "timespan": "24h", "language": "english", "country": null, "category": "design-inspiration"},
+    "google_news": {"enabled": false, "query": "basketball jersey", "language": "zh", "country": "CN", "ceid": "CN:zh-Hans", "max_results": 20, "category": "design-inspiration"}
   },
   "filtering": {
-    "ai_score_threshold": 8.0,
-    "time_window_hours": 24
-  },
-  "webhook": {
-    "enabled": true,
-    "url_env": "HORIZON_WEBHOOK_URL",
-    "delivery": "summary_and_items",
-    "overview_position": "last",
-    "platform": "feishu",
-    "layout": "collapsible",
-    "fallback_layout": "markdown",
-    "languages": [
-      "zh"
-    ],
-    "request_body": {
-      "msg_type": "interactive",
-      "card": {
-        "schema": "2.0",
-        "config": {
-          "wide_screen_mode": true
-        },
-        "header": {
-          "title": {
-            "tag": "plain_text",
-            "content": "#{message_title}"
-          },
-          "template": "blue"
-        },
-        "body": {
-          "elements": [
-            {
-              "tag": "markdown",
-              "content": "#{summary}"
-            }
-          ]
-        }
-      }
+    "ai_score_threshold": 6.5,
+    "time_window_hours": 24,
+    "max_items": 20,
+    "category_groups": {
+      "design": {"name": "设计灵感", "limit": 12, "categories": ["design-inspiration"]},
+      "market": {"name": "市场商机", "limit": 6, "categories": ["market-opportunity"]},
+      "supply": {"name": "工艺供应链", "limit": 2, "categories": ["supply-chain"]}
     },
-    "headers": ""
+    "default_group": "unclassified",
+    "default_group_limit": 1
   }
 }
