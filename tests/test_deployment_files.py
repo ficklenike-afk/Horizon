@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "daily-summary.yml"
@@ -20,6 +22,36 @@ def _step(workflow: str, name: str) -> str:
     )
     assert match is not None, f"missing workflow step: {name}"
     return match.group(0)
+
+
+def _assert_required_step_order(workflow: str) -> None:
+    required_order = (
+        "Determine Twitter schedule",
+        "Prepare production config",
+        "Run Horizon",
+        "Check that runtime secrets were not written",
+        "Deploy to GitHub Pages",
+    )
+    positions = [workflow.index(_step(workflow, name)) for name in required_order]
+    assert positions == sorted(positions), (
+        "required workflow step order: " + " < ".join(required_order)
+    )
+
+
+def test_workflow_has_required_step_order():
+    _assert_required_step_order(_read(WORKFLOW_PATH))
+
+
+def test_required_step_order_rejects_run_before_production_config():
+    workflow = _read(WORKFLOW_PATH)
+    prepare = _step(workflow, "Prepare production config")
+    run_horizon = _step(workflow, "Run Horizon")
+    malformed = workflow.replace(prepare, "__PREPARE_STEP__", 1)
+    malformed = malformed.replace(run_horizon, prepare, 1)
+    malformed = malformed.replace("__PREPARE_STEP__", run_horizon, 1)
+
+    with pytest.raises(AssertionError, match="required workflow step order"):
+        _assert_required_step_order(malformed)
 
 
 def test_workflow_has_exact_daily_and_manual_triggers():
