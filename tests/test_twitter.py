@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import pytest
 
 from src.models import TwitterConfig
 from src.scrapers.twitter import TwitterScraper
@@ -69,6 +70,33 @@ def _run_resp(run_id="run1", dataset_id="ds1"):
 
 def _status_resp(status="SUCCEEDED"):
     return {"data": {"status": status}}
+
+
+def test_twitter_effective_since_extends_only_twitter_window():
+    config = TwitterConfig(
+        enabled=True,
+        mode="apify",
+        users=["NBA"],
+        fetch_limit=100,
+        category="design-inspiration",
+        lookback_hours=72,
+    )
+    scraper = TwitterScraper(config, None)
+    now = datetime(2026, 7, 27, 0, 0, tzinfo=timezone.utc)
+    pipeline_since = now - timedelta(hours=24)
+
+    effective = scraper._effective_since(pipeline_since, now=now)
+
+    assert effective == now - timedelta(hours=72)
+
+
+def test_twitter_lookback_is_bounded():
+    with pytest.raises(ValueError):
+        TwitterConfig(
+            enabled=True,
+            users=["NBA"],
+            lookback_hours=169,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +194,7 @@ def test_metadata_keys_aligned_for_analyzer(monkeypatch):
 def test_filters_old_tweets(monkeypatch):
     monkeypatch.setenv("APIFY_TOKEN", "test_token")
     since = datetime.now(timezone.utc)
-    old = (since - timedelta(hours=2)).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    old = (since - timedelta(hours=25)).strftime("%a %b %d %H:%M:%S +0000 %Y")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "/runs" in request.url.path and request.method == "POST":

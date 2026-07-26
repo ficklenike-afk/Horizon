@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import List, Optional
 
@@ -27,7 +27,18 @@ class TwitterScraper(BaseScraper):
         super().__init__(config, http_client)
         self.config = config
 
+    def _effective_since(
+        self,
+        since: datetime,
+        *,
+        now: Optional[datetime] = None,
+    ) -> datetime:
+        current = now or datetime.now(timezone.utc)
+        lookback_since = current - timedelta(hours=self.config.lookback_hours)
+        return min(since, lookback_since)
+
     async def fetch(self, since: datetime) -> List[ContentItem]:
+        effective_since = self._effective_since(since)
         if not self.config.enabled:
             return []
 
@@ -58,7 +69,7 @@ class TwitterScraper(BaseScraper):
         for raw in raw_items:
             if isinstance(raw, dict) and raw.get("noResults"):
                 continue
-            parsed = self._parse_item(raw, since)
+            parsed = self._parse_item(raw, effective_since)
             if parsed:
                 items.append(parsed)
 

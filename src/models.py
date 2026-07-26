@@ -267,6 +267,7 @@ class TwitterConfig(BaseModel):
     users: List[str] = Field(default_factory=list)
     fetch_limit: int = 10
     category: Optional[str] = None
+    lookback_hours: int = Field(default=24, ge=1, le=168)
     fetch_reply_text: bool = False
     max_replies_per_tweet: int = 3
     max_tweets_to_expand: int = 10

@@ -27,6 +27,7 @@ def test_github_config_is_jersey_business_profile(tmp_path, monkeypatch):
     assert config.sources.twitter is not None
     assert config.sources.twitter.enabled is False
     assert config.sources.twitter.mode == "apify"
+    assert config.sources.twitter.lookback_hours == 72
     assert config.sources.twitter.fetch_reply_text is False
     assert config.sources.gdelt is not None
     assert config.sources.gdelt.enabled is True
@@ -45,6 +46,7 @@ def test_all_enabled_sources_have_business_categories(tmp_path, monkeypatch):
         source.category in allowed
         for source in config.sources.reddit.subreddits
     )
+    assert config.sources.twitter.enabled is True
     assert config.sources.twitter.category in allowed
     assert config.sources.gdelt.category in allowed
 
