@@ -3,19 +3,33 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from rich.console import Console
 
-from src.models import ContentItem, SourceType
+from src.models import (
+    ContentItem,
+    GDELTConfig,
+    RedditConfig,
+    RedditSubredditConfig,
+    RSSSourceConfig,
+    SourceType,
+    TwitterConfig,
+)
 from src.orchestrator import (
     FetchReport,
     HorizonOrchestrator,
     SourceFetchOutcome,
     build_source_warnings,
 )
+from src.scrapers.gdelt import GDELTScraper
+from src.scrapers.reddit import RedditScraper
+from src.scrapers.rss import RSSScraper
+from src.scrapers.twitter import TwitterScraper
 
 
 SINCE = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -304,3 +318,153 @@ def test_source_warnings_cover_failures_but_ignore_other_empty_sources() -> None
     assert warnings == ["RSS Feeds 本次抓取失败，其他来源继续运行。"]
     assert "private detail" not in repr(warnings)
     assert build_source_warnings(None) == []
+
+
+@pytest.mark.parametrize("source_name", ["RSS Feeds", "Reddit", "GDELT", "Twitter"])
+def test_active_scraper_terminal_failures_are_reported_as_failures(
+    monkeypatch,
+    source_name: str,
+) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_test-only-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, request=request, text="terminal failure")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    if source_name == "RSS Feeds":
+        scraper = RSSScraper(
+            [RSSSourceConfig(name="Broken feed", url="https://feeds.test/rss")],
+            client,
+        )
+    elif source_name == "Reddit":
+        scraper = RedditScraper(
+            RedditConfig(
+                enabled=True,
+                subreddits=[
+                    RedditSubredditConfig(
+                        subreddit="UniWatch",
+                        enabled=True,
+                        fetch_limit=1,
+                    )
+                ],
+                users=[],
+                fetch_comments=0,
+            ),
+            client,
+        )
+    elif source_name == "GDELT":
+        scraper = GDELTScraper(
+            GDELTConfig(enabled=True, query="basketball jersey"),
+            client,
+        )
+    else:
+        scraper = TwitterScraper(
+            TwitterConfig(
+                enabled=True,
+                users=["NBA"],
+                apify_token_env="APIFY_TOKEN",
+            ),
+            client,
+        )
+
+    orchestrator = make_orchestrator()
+    outcome = asyncio.run(
+        orchestrator._fetch_with_progress(source_name, scraper, SINCE)
+    )
+    asyncio.run(client.aclose())
+
+    assert outcome.status == "failure"
+    assert outcome.items == []
+
+
+def test_rss_partial_sub_source_failure_keeps_items_and_safe_diagnostics() -> None:
+    feed = """\
+    <rss version="2.0"><channel><title>Test</title>
+      <item><guid>kept</guid><title>Kept item</title>
+        <link>https://news.test/kept</link>
+        <pubDate>Fri, 02 Jan 2026 12:00:00 GMT</pubDate>
+      </item>
+    </channel></rss>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "healthy.test":
+            return httpx.Response(200, request=request, text=feed)
+        return httpx.Response(500, request=request, text="private upstream detail")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    scraper = RSSScraper(
+        [
+            RSSSourceConfig(name="Healthy feed", url="https://healthy.test/rss"),
+            RSSSourceConfig(name="Broken feed", url="https://broken.test/rss"),
+        ],
+        client,
+    )
+    orchestrator = make_orchestrator()
+
+    outcome = asyncio.run(
+        orchestrator._fetch_with_progress("RSS Feeds", scraper, SINCE)
+    )
+    asyncio.run(client.aclose())
+
+    assert outcome.status == "success"
+    assert [item.title for item in outcome.items] == ["Kept item"]
+    assert outcome.warnings == ["Broken feed failed"]
+    assert "private upstream detail" not in repr(outcome.to_dict())
+
+
+def test_chinese_run_writes_chinese_only_post_front_matter(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    orchestrator = make_orchestrator()
+    item = make_item("selected")
+    item.ai_score = 8.5
+    item.ai_summary = "城市主题篮球球衣采用本地文化纹样。"
+    item.ai_reason = "设计叙事清楚。"
+    item.ai_tags = ["城市文化"]
+    item.metadata.update(
+        {
+            "category": "design-inspiration",
+            "title_zh": "城市文化篮球球衣发布",
+            "detailed_summary_zh": "城市主题篮球球衣采用本地文化纹样。",
+            "design_breakdown_zh": "配色与号码形成清楚层级。",
+            "business_value_zh": "适合校园球队原创设计。",
+            "recommended_action_zh": "先制作本地文化纹样草案。",
+            "ip_risk_zh": "不要复制球队注册标识。",
+            "analysis_failed": False,
+        }
+    )
+    orchestrator.config = SimpleNamespace(  # type: ignore[assignment]
+        email=None,
+        filtering=SimpleNamespace(time_window_hours=24),
+        ai=SimpleNamespace(languages=["zh"]),
+        sources=SimpleNamespace(twitter=None),
+    )
+    orchestrator.storage = SimpleNamespace(  # type: ignore[assignment]
+        save_daily_summary=Mock(return_value=tmp_path / "summary.md")
+    )
+    orchestrator.email_manager = None
+    orchestrator.webhook_notifier = None
+    orchestrator.fetch_all_sources = AsyncMock(return_value=[item])  # type: ignore[method-assign]
+    orchestrator.merge_cross_source_duplicates = Mock(return_value=[item])  # type: ignore[method-assign]
+    orchestrator._analyze_content = AsyncMock(return_value=[item])  # type: ignore[method-assign]
+    orchestrator.filter_items = AsyncMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(items=[item])
+    )
+    orchestrator._expand_twitter_discussion = AsyncMock()  # type: ignore[method-assign]
+    orchestrator.apply_balanced_digest = Mock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(items=[item])
+    )
+    orchestrator._enrich_important_items = AsyncMock()  # type: ignore[method-assign]
+
+    asyncio.run(orchestrator.run())
+
+    posts = list((tmp_path / "docs" / "_posts").glob("*-summary-zh.md"))
+    assert len(posts) == 1
+    post = posts[0].read_text(encoding="utf-8")
+    date = posts[0].name.removesuffix("-summary-zh.md")
+    assert f'title: "篮球球衣商业情报：{date}"' in post
+    assert "Horizon Summary" not in post
+    assert "(ZH)" not in post

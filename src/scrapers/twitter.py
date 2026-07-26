@@ -10,8 +10,9 @@ from typing import List, Optional
 from dateutil.parser import isoparse
 import httpx
 
-from .base import BaseScraper
+from .base import BaseScraper, ScraperFetchError
 from ..models import ContentItem, SourceType, TwitterConfig
+from ..services.publication_validator import redact_runtime_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ class TwitterScraper(BaseScraper):
         super().__init__(config, http_client)
         self.config = config
 
+    @staticmethod
+    def _auth_headers(token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
     def _effective_since(
         self,
         since: datetime,
@@ -34,8 +39,7 @@ class TwitterScraper(BaseScraper):
         now: Optional[datetime] = None,
     ) -> datetime:
         current = now or datetime.now(timezone.utc)
-        lookback_since = current - timedelta(hours=self.config.lookback_hours)
-        return min(since, lookback_since)
+        return current - timedelta(hours=self.config.lookback_hours)
 
     async def fetch(self, since: datetime) -> List[ContentItem]:
         effective_since = self._effective_since(since)
@@ -52,17 +56,13 @@ class TwitterScraper(BaseScraper):
             logger.warning(
                 f"Apify token not found in env var '{self.config.apify_token_env}'. Skipping Twitter."
             )
-            return []
+            raise ScraperFetchError("Apify token is not configured")
 
         logger.info(f"Fetching Twitter (Apify) for users: {users}")
 
         run_id, dataset_id = await self._start_run(token, users)
-        if not run_id:
-            return []
 
         succeeded = await self._wait_for_run(token, run_id)
-        if not succeeded:
-            return []
 
         raw_items = await self._fetch_dataset(token, dataset_id)
         items = []
@@ -85,9 +85,14 @@ class TwitterScraper(BaseScraper):
             "search_sort": "Latest",
             "max_items": max(100, self.config.fetch_limit),
         }
-        url = f"{_APIFY_BASE}/acts/{self.config.actor_id}/runs?token={token}"
+        url = f"{_APIFY_BASE}/acts/{self.config.actor_id}/runs"
         try:
-            resp = await self.client.post(url, json=payload, timeout=30.0)
+            resp = await self.client.post(
+                url,
+                json=payload,
+                headers=self._auth_headers(token),
+                timeout=30.0,
+            )
             resp.raise_for_status()
             data = resp.json()["data"]
             run_id = data["id"]
@@ -95,38 +100,61 @@ class TwitterScraper(BaseScraper):
             logger.debug(f"Started Apify run {run_id}, dataset {dataset_id}")
             return run_id, dataset_id
         except Exception as exc:
-            logger.error(f"Failed to start Apify run: {exc}")
-            return None, None
+            logger.error(
+                "Failed to start Apify run: %s",
+                redact_runtime_secrets(exc),
+            )
+            raise ScraperFetchError("Apify run could not be started") from exc
 
     async def _wait_for_run(self, token: str, run_id: str) -> bool:
-        url = f"{_APIFY_BASE}/actor-runs/{run_id}?token={token}"
+        url = f"{_APIFY_BASE}/actor-runs/{run_id}"
         elapsed = 0.0
         while elapsed < _MAX_WAIT:
             try:
-                resp = await self.client.get(url, timeout=10.0)
+                resp = await self.client.get(
+                    url,
+                    headers=self._auth_headers(token),
+                    timeout=10.0,
+                )
                 resp.raise_for_status()
                 status = resp.json()["data"]["status"]
                 if status == "SUCCEEDED":
                     return True
                 if status in ("FAILED", "ABORTED", "TIMED-OUT"):
                     logger.error(f"Apify run {run_id} ended with status: {status}")
-                    return False
+                    raise ScraperFetchError(
+                        f"Apify run ended with terminal status {status}"
+                    )
+            except ScraperFetchError:
+                raise
             except Exception as exc:
-                logger.warning(f"Error polling Apify run {run_id}: {exc}")
+                logger.warning(
+                    "Error polling Apify run %s: %s",
+                    run_id,
+                    redact_runtime_secrets(exc),
+                )
             await asyncio.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
         logger.warning(f"Apify run {run_id} timed out after {_MAX_WAIT}s.")
-        return False
+        raise ScraperFetchError("Apify run timed out")
 
     async def _fetch_dataset(self, token: str, dataset_id: str) -> list:
-        url = f"{_APIFY_BASE}/datasets/{dataset_id}/items?token={token}"
+        url = f"{_APIFY_BASE}/datasets/{dataset_id}/items"
         try:
-            resp = await self.client.get(url, timeout=30.0)
+            resp = await self.client.get(
+                url,
+                headers=self._auth_headers(token),
+                timeout=30.0,
+            )
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
-            logger.error(f"Failed to fetch Apify dataset {dataset_id}: {exc}")
-            return []
+            logger.error(
+                "Failed to fetch Apify dataset %s: %s",
+                dataset_id,
+                redact_runtime_secrets(exc),
+            )
+            raise ScraperFetchError("Apify dataset request failed") from exc
 
     async def fetch_replies_for_item(self, item: ContentItem) -> List[str]:
         """Fetch reply texts for one tweet using scweet search mode."""
@@ -153,15 +181,24 @@ class TwitterScraper(BaseScraper):
             "max_items": max_items,
         }
 
-        url = f"{_APIFY_BASE}/acts/{self.config.actor_id}/runs?token={token}"
+        url = f"{_APIFY_BASE}/acts/{self.config.actor_id}/runs"
         try:
-            resp = await self.client.post(url, json=payload, timeout=30.0)
+            resp = await self.client.post(
+                url,
+                json=payload,
+                headers=self._auth_headers(token),
+                timeout=30.0,
+            )
             resp.raise_for_status()
             data = resp.json()["data"]
             run_id = data["id"]
             dataset_id = data["defaultDatasetId"]
         except Exception as exc:
-            logger.warning(f"Failed to start replies run for {item.id}: {exc}")
+            logger.warning(
+                "Failed to start replies run for %s: %s",
+                item.id,
+                redact_runtime_secrets(exc),
+            )
             return []
 
         if not await self._wait_for_run(token, run_id):
@@ -321,5 +358,8 @@ class TwitterScraper(BaseScraper):
                 },
             )
         except Exception as exc:
-            logger.debug(f"Failed to parse tweet: {exc}")
+            logger.debug(
+                "Failed to parse tweet: %s",
+                redact_runtime_secrets(exc),
+            )
             return None

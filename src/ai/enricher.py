@@ -24,6 +24,32 @@ from .utils import parse_json_response
 from ..models import ContentItem
 
 
+_CHINESE_TEXT = re.compile(r"[\u3400-\u9fff]")
+_REQUIRED_ENRICHMENT_FIELDS = (
+    "title_zh",
+    "whats_new_zh",
+    "business_value_zh",
+)
+_CATEGORY_FALLBACKS = {
+    "design-inspiration": (
+        "篮球球衣设计情报",
+        "该条目属于设计灵感，建议结合原始来源核对配色、版型、字体、号码与原创性风险。",
+    ),
+    "market-opportunity": (
+        "篮球球衣市场商机",
+        "该条目属于市场商机，建议结合原始来源核对客户场景、时间窗口、需求信号与跟进行动。",
+    ),
+    "supply-chain": (
+        "篮球球衣工艺供应链情报",
+        "该条目属于工艺供应链，建议结合原始来源核对材料、质量、成本、起订量、交期与打样条件。",
+    ),
+}
+_DEFAULT_FALLBACK = (
+    "篮球球衣商业情报",
+    "该条目属于篮球球衣商业情报，建议结合原始来源核对事实、适用场景与后续行动。",
+)
+
+
 class ContentEnricher:
     """Enriches high-scoring content items with background knowledge."""
 
@@ -52,6 +78,8 @@ class ContentEnricher:
                 except Exception as e:
                     print(f"Error enriching item {item.id}: {e}, falling back to translation")
                     await self._translate_item(item)
+                finally:
+                    self._ensure_chinese_fallback(item)
             progress.advance(progress_task)
 
         with Progress(
@@ -98,6 +126,45 @@ class ContentEnricher:
         Returns the parsed dict, or None if all strategies fail.
         """
         return parse_json_response(response)
+
+    @staticmethod
+    def _has_required_enrichment_shape(result: object) -> bool:
+        return isinstance(result, dict) and all(
+            isinstance(result.get(field), str) and result[field].strip()
+            for field in _REQUIRED_ENRICHMENT_FIELDS
+        )
+
+    @staticmethod
+    def _chinese_value(value: object) -> str:
+        text = str(value or "").strip()
+        return text if _CHINESE_TEXT.search(text) else ""
+
+    def _ensure_chinese_fallback(self, item: ContentItem) -> None:
+        category = str(item.metadata.get("category") or "")
+        fallback_title, fallback_summary = _CATEGORY_FALLBACKS.get(
+            category,
+            _DEFAULT_FALLBACK,
+        )
+
+        title = self._chinese_value(item.metadata.get("title_zh"))
+        if not title:
+            title = self._chinese_value(item.ai_summary)
+        if not title:
+            title = self._chinese_value(item.ai_reason)
+        item.metadata["title_zh"] = title[:60] if title else fallback_title
+
+        summary_parts = []
+        for value in (
+            item.metadata.get("detailed_summary_zh"),
+            item.ai_summary,
+            item.ai_reason,
+        ):
+            text = self._chinese_value(value)
+            if text and text not in summary_parts:
+                summary_parts.append(text)
+        detailed_summary = "；".join(summary_parts) if summary_parts else fallback_summary
+        item.metadata["detailed_summary_zh"] = detailed_summary
+        item.metadata["detailed_summary"] = detailed_summary
 
     async def _extract_concepts(self, item: ContentItem, content_text: str) -> List[str]:
         """Ask AI to identify concepts that need explanation.
@@ -193,10 +260,13 @@ class ContentEnricher:
 
         # Parse JSON response with robust fallback
         result = self._parse_json_response(response)
-        if result is None:
+        if result is None or not self._has_required_enrichment_shape(result):
             # Gracefully degrade: fall back to a lightweight translation
             # instead of dropping the item untranslated.
-            print(f"Warning: could not parse enrichment response for {item.id}, falling back to translation")
+            print(
+                f"Warning: incomplete enrichment response for {item.id}, "
+                "falling back to translation"
+            )
             await self._translate_item(item)
             return
 

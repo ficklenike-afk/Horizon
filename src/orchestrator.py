@@ -120,6 +120,7 @@ class SourceFetchOutcome:
     status: Literal["success", "empty", "failure"]
     items: List[ContentItem] = field(default_factory=list)
     error: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, object]:
         result: Dict[str, object] = {
@@ -129,6 +130,8 @@ class SourceFetchOutcome:
         }
         if self.error is not None:
             result["error"] = self.error
+        if self.warnings:
+            result["warnings"] = list(self.warnings)
         return result
 
 
@@ -325,10 +328,15 @@ class HorizonOrchestrator:
                     dest_path = safe_output_path(posts_dir, post_filename)
 
                     # Add Jekyll front matter
+                    post_title = (
+                        f"篮球球衣商业情报：{today}"
+                        if lang.lower().startswith("zh")
+                        else f"Horizon Summary: {today} ({lang.upper()})"
+                    )
                     front_matter = (
                         "---\n"
                         "layout: default\n"
-                        f"title: \"Horizon Summary: {today} ({lang.upper()})\"\n"
+                        f"title: \"{post_title}\"\n"
                         f"date: {today}\n"
                         f"lang: {lang}\n"
                         "---\n\n"
@@ -516,6 +524,9 @@ class HorizonOrchestrator:
             )
 
         self.console.print(f"   Found {len(items)} items from {name}")
+        warnings = list(getattr(scraper, "fetch_warnings", []))
+        for warning in warnings:
+            self.console.print(f"[yellow]      ⚠️ {warning}[/yellow]")
 
         # Show per-sub-source breakdown when there are multiple sub-sources
         sub_counts: Dict[str, int] = defaultdict(int)
@@ -529,6 +540,7 @@ class HorizonOrchestrator:
             source_name=name,
             status="success" if items else "empty",
             items=items,
+            warnings=warnings,
         )
 
     @staticmethod

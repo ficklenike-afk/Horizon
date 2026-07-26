@@ -2,12 +2,15 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from src.models import TwitterConfig
+from src.scrapers.base import ScraperFetchError
 from src.scrapers.twitter import TwitterScraper
+from src.services.publication_validator import redact_runtime_secrets
 
 
 def _make_config(**kwargs) -> TwitterConfig:
@@ -90,6 +93,23 @@ def test_twitter_effective_since_extends_only_twitter_window():
     assert effective == now - timedelta(hours=72)
 
 
+def test_twitter_effective_since_does_not_widen_for_older_global_window():
+    scraper = TwitterScraper(
+        TwitterConfig(
+            enabled=True,
+            users=["NBA"],
+            lookback_hours=72,
+        ),
+        None,
+    )
+    now = datetime(2026, 7, 27, 0, 0, tzinfo=timezone.utc)
+    forced_global_since = now - timedelta(hours=120)
+
+    effective = scraper._effective_since(forced_global_since, now=now)
+
+    assert effective == now - timedelta(hours=72)
+
+
 def test_twitter_lookback_is_bounded():
     with pytest.raises(ValueError):
         TwitterConfig(
@@ -127,15 +147,15 @@ def test_no_users_returns_empty():
     assert result == []
 
 
-def test_missing_token_returns_empty(monkeypatch):
+def test_missing_token_is_terminal_failure(monkeypatch):
     monkeypatch.delenv("APIFY_TOKEN", raising=False)
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=[]))
     client = httpx.AsyncClient(transport=transport)
-    result = asyncio.run(
-        TwitterScraper(_make_config(), client).fetch(datetime.now(timezone.utc))
-    )
+    with pytest.raises(ScraperFetchError, match="token"):
+        asyncio.run(
+            TwitterScraper(_make_config(), client).fetch(datetime.now(timezone.utc))
+        )
     asyncio.run(client.aclose())
-    assert result == []
 
 
 def test_successful_fetch_returns_items(monkeypatch):
@@ -160,6 +180,83 @@ def test_successful_fetch_returns_items(monkeypatch):
     assert len(result) == 2
     assert result[0].source_type.value == "twitter"
     assert result[0].metadata["favorite_count"] == 10
+
+
+def test_apify_auth_uses_bearer_headers_for_fetch_and_reply_paths(monkeypatch):
+    token = "apify_api_private-token-value"
+    monkeypatch.setenv("APIFY_TOKEN", token)
+    requests = []
+    run_number = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal run_number
+        requests.append(request)
+        if "/runs" in request.url.path and request.method == "POST":
+            run_number += 1
+            return httpx.Response(
+                200,
+                json=_run_resp(f"run{run_number}", f"ds{run_number}"),
+            )
+        if "/actor-runs/" in request.url.path:
+            return httpx.Response(200, json=_status_resp())
+        if request.url.path.endswith("/datasets/ds1/items"):
+            return httpx.Response(200, json=[_tweet("42")])
+        if request.url.path.endswith("/datasets/ds2/items"):
+            return httpx.Response(200, json=[_reply_row("99", "alice")])
+        raise AssertionError(f"Unexpected: {request.url}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    scraper = TwitterScraper(
+        _make_config(fetch_reply_text=True, max_replies_per_tweet=1),
+        client,
+    )
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    items = asyncio.run(scraper.fetch(since))
+    replies = asyncio.run(scraper.fetch_replies_for_item(items[0]))
+    asyncio.run(client.aclose())
+
+    assert replies
+    assert len(requests) == 6
+    assert all(request.headers["authorization"] == f"Bearer {token}" for request in requests)
+    assert all("token" not in request.url.params for request in requests)
+    assert all(token not in str(request.url) for request in requests)
+
+
+def test_apify_exception_logs_and_errors_redact_token_bearing_urls(
+    monkeypatch,
+    caplog,
+):
+    token = "apify_api_private-token-value"
+    monkeypatch.setenv("APIFY_TOKEN", token)
+    token_url = f"https://api.apify.com/v2/acts/test/runs?token={token}"
+    request = httpx.Request("POST", token_url)
+    response = httpx.Response(500, request=request)
+    status_error = httpx.HTTPStatusError(
+        "server error",
+        request=request,
+        response=response,
+    )
+    request_error = httpx.RequestError(
+        f"request failed for {token_url}",
+        request=httpx.Request("GET", token_url),
+    )
+    client = AsyncMock()
+    client.post.side_effect = status_error
+    client.get.side_effect = request_error
+    scraper = TwitterScraper(_make_config(), client)
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(ScraperFetchError) as status_failure:
+            asyncio.run(scraper._start_run(token, ["karpathy"]))
+        with pytest.raises(ScraperFetchError) as request_failure:
+            asyncio.run(scraper._fetch_dataset(token, "dataset"))
+
+    assert token not in caplog.text
+    assert token not in str(status_failure.value)
+    assert token not in str(request_failure.value)
+    assert token not in redact_runtime_secrets(status_error)
+    assert token not in redact_runtime_secrets(request_error)
 
 
 def test_metadata_keys_aligned_for_analyzer(monkeypatch):
@@ -212,7 +309,7 @@ def test_filters_old_tweets(monkeypatch):
     assert result == []
 
 
-def test_run_failure_returns_empty(monkeypatch):
+def test_run_failure_is_terminal(monkeypatch):
     monkeypatch.setenv("APIFY_TOKEN", "test_token")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -224,26 +321,26 @@ def test_run_failure_returns_empty(monkeypatch):
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport)
-    result = asyncio.run(
-        TwitterScraper(_make_config(), client).fetch(
-            datetime.now(timezone.utc) - timedelta(hours=1)
+    with pytest.raises(ScraperFetchError, match="terminal status FAILED"):
+        asyncio.run(
+            TwitterScraper(_make_config(), client).fetch(
+                datetime.now(timezone.utc) - timedelta(hours=1)
+            )
         )
-    )
     asyncio.run(client.aclose())
-    assert result == []
 
 
-def test_start_run_http_error_returns_empty(monkeypatch):
+def test_start_run_http_error_is_terminal(monkeypatch):
     monkeypatch.setenv("APIFY_TOKEN", "test_token")
     transport = httpx.MockTransport(lambda r: httpx.Response(500, text="error"))
     client = httpx.AsyncClient(transport=transport)
-    result = asyncio.run(
-        TwitterScraper(_make_config(), client).fetch(
-            datetime.now(timezone.utc) - timedelta(hours=1)
+    with pytest.raises(ScraperFetchError, match="could not be started"):
+        asyncio.run(
+            TwitterScraper(_make_config(), client).fetch(
+                datetime.now(timezone.utc) - timedelta(hours=1)
+            )
         )
-    )
     asyncio.run(client.aclose())
-    assert result == []
 
 
 def test_no_results_item_skipped(monkeypatch):

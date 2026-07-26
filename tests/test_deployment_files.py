@@ -189,6 +189,7 @@ def test_jekyll_config_has_chinese_branding_and_preserves_feed_defaults():
         config,
     )
     assert re.search(r'(?m)^baseurl: "/Horizon"', config)
+    assert re.search(r'(?m)^url: ""(?:\s+#.*)?$', config)
     assert re.search(r"(?ms)^plugins:\n  - jekyll-feed\nfeed:\n  path: feed\.xml$", config)
     assert re.search(
         r'(?ms)^defaults:\n  - scope:\n      path: ""\n      type: "posts"\n'

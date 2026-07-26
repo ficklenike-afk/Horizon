@@ -27,7 +27,7 @@ from typing import Any, List, Optional
 
 import httpx
 
-from .base import BaseScraper
+from .base import BaseScraper, ScraperFetchError
 from ..models import ContentItem, GDELTConfig, SourceType
 
 logger = logging.getLogger(__name__)
@@ -99,10 +99,10 @@ class GDELTScraper(BaseScraper):
                 payload = response.json()
             except Exception as exc:
                 logger.warning("GDELT returned a non-JSON body: %s", exc)
-                return []
+                raise ScraperFetchError("GDELT returned an invalid response") from exc
 
             if not isinstance(payload, dict):
-                return []
+                raise ScraperFetchError("GDELT returned an invalid response")
 
             articles = payload.get("articles")
             if not articles:
@@ -115,12 +115,14 @@ class GDELTScraper(BaseScraper):
                     items.append(item)
             return items
 
+        except ScraperFetchError:
+            raise
         except httpx.HTTPError as exc:
             logger.warning("Error fetching GDELT articles: %s", exc)
-            return []
+            raise ScraperFetchError("GDELT request failed") from exc
         except Exception as exc:
             logger.warning("Error parsing GDELT response: %s", exc)
-            return []
+            raise ScraperFetchError("GDELT response parsing failed") from exc
 
     def _raw_to_item(self, raw: Any) -> Optional[ContentItem]:
         """Map one GDELT article record into a ContentItem.

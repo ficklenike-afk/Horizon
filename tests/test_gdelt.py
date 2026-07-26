@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
+import pytest
 
 from src.models import GDELTConfig
+from src.scrapers.base import ScraperFetchError
 from src.scrapers.gdelt import GDELTScraper
 
 
@@ -110,13 +112,14 @@ def test_disabled_config_returns_empty() -> None:
     assert asyncio.run(scraper.fetch(SINCE)) == []
 
 
-def test_http_error_returns_empty() -> None:
+def test_http_error_is_terminal_failure() -> None:
     client = AsyncMock()
     client.get.side_effect = httpx.HTTPError("boom")
     config = GDELTConfig(enabled=True, query="ai")
     scraper = GDELTScraper(config, client)
 
-    assert asyncio.run(scraper.fetch(SINCE)) == []
+    with pytest.raises(ScraperFetchError, match="request failed"):
+        asyncio.run(scraper.fetch(SINCE))
 
 
 def test_missing_articles_key_returns_empty() -> None:
@@ -167,7 +170,7 @@ def test_bad_article_is_skipped_not_crashing() -> None:
     assert str(items[0].url) == "https://example.com/good"
 
 
-def test_non_json_body_returns_empty() -> None:
+def test_non_json_body_is_terminal_failure() -> None:
     response = MagicMock()
     response.json.side_effect = ValueError("no json")
     response.raise_for_status.return_value = None
@@ -176,4 +179,5 @@ def test_non_json_body_returns_empty() -> None:
     config = GDELTConfig(enabled=True, query="ai")
     scraper = GDELTScraper(config, client)
 
-    assert asyncio.run(scraper.fetch(SINCE)) == []
+    with pytest.raises(ScraperFetchError, match="invalid response"):
+        asyncio.run(scraper.fetch(SINCE))

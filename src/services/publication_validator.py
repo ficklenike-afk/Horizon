@@ -24,6 +24,11 @@ _REQUIRED_SECTION_PATTERNS = (
 )
 _SOURCE_LINK = re.compile(r"\[[^\]]+\]\(https?://[^)]+\)")
 _RUNTIME_SECRET_ENV_NAMES = ("DEEPSEEK_API_KEY", "APIFY_TOKEN")
+_TYPICAL_SECRET_PREFIX = re.compile(
+    r"(?<![A-Za-z0-9_-])"
+    r"(?:sk-[A-Za-z0-9_-]{24,}|apify_api_[A-Za-z0-9_-]{24,})"
+    r"(?![A-Za-z0-9_-])"
+)
 
 
 class PublicationValidationError(RuntimeError):
@@ -78,6 +83,11 @@ def contains_secret_value(
     return False
 
 
+def contains_typical_secret_prefix(content: str | bytes) -> bool:
+    """Detect conservative long key-shaped values even without runtime secrets."""
+    return _TYPICAL_SECRET_PREFIX.search(canonicalize_secret_text(content)) is not None
+
+
 def validate_analysis_health(items: list[ContentItem]) -> None:
     """Require at least one successfully analyzed content item."""
     if not items:
@@ -126,7 +136,9 @@ def validate_markdown(
         raise PublicationValidationError(
             "Generated Markdown contains unresolved environment reference"
         )
-    if contains_secret_value(markdown, secret_values):
+    if contains_secret_value(markdown, secret_values) or contains_typical_secret_prefix(
+        markdown
+    ):
         raise PublicationValidationError(
             "Generated Markdown contains a runtime secret"
         )

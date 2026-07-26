@@ -8,6 +8,10 @@ import httpx
 from ..models import ContentItem
 
 
+class ScraperFetchError(RuntimeError):
+    """Raised when a configured scraper has no successful fetch path."""
+
+
 class BaseScraper(ABC):
     """Abstract base class for all scrapers."""
 
@@ -20,6 +24,7 @@ class BaseScraper(ABC):
         """
         self.config = config
         self.client = http_client
+        self.fetch_warnings: List[str] = []
 
     @abstractmethod
     async def fetch(self, since: datetime) -> List[ContentItem]:

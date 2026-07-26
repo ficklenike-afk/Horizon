@@ -144,6 +144,36 @@ def test_rejects_escaped_runtime_secret(escaped_secret: str) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "token_like_value",
+    [
+        "sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+        "apify_api_abcdefghijklmnopqrstuvwxyz123456",
+    ],
+)
+def test_rejects_typical_long_secret_prefixes_without_runtime_values(
+    token_like_value: str,
+) -> None:
+    with pytest.raises(PublicationValidationError, match="secret"):
+        validate_markdown(
+            f"{_valid_markdown()}\n{token_like_value}",
+            [],
+        )
+
+
+@pytest.mark.parametrize(
+    "short_example",
+    [
+        "sk-short-example",
+        "apify_api_docs_example",
+    ],
+)
+def test_allows_short_prefix_examples_to_avoid_false_positives(
+    short_example: str,
+) -> None:
+    validate_markdown(f"{_valid_markdown()}\n{short_example}", [])
+
+
 def test_rejects_markdown_without_grouped_sections_or_source_link() -> None:
     sections_only = (
         "## 设计灵感（1）\n"
