@@ -27,6 +27,58 @@ def _make_item(idx: int) -> ContentItem:
     return item
 
 
+def _business_item(idx, category, tag, action):
+    item = _make_item(idx)
+    item.metadata.update(
+        {
+            "category": category,
+            "title_zh": f"中文标题 {idx}",
+            "detailed_summary_zh": f"中文摘要 {idx}",
+            "design_breakdown_zh": "配色与号码形成清楚层级。",
+            "business_value_zh": "适合目标客户场景。",
+            "recommended_action_zh": action,
+            "ip_risk_zh": "不要复制注册标识。",
+        }
+    )
+    item.ai_tags = [tag]
+    return item
+
+
+def test_generate_summary_zh_groups_business_sections_and_actions():
+    summarizer = DailySummarizer()
+    items = [
+        _business_item(
+            1, "design-inspiration", "城市文化", "制作本地文化纹样草案。"
+        ),
+        _business_item(
+            2, "market-opportunity", "校园篮球", "建立校园赛事触达清单。"
+        ),
+        _business_item(
+            3, "supply-chain", "热升华", "向供应商申请耐洗测试样。"
+        ),
+    ]
+
+    result = _run_async(
+        summarizer.generate_summary(
+            items,
+            date="2026-07-26",
+            total_fetched=40,
+            language="zh",
+            source_warnings=["Twitter 本次抓取失败，其他来源正常。"],
+        )
+    )
+
+    assert "## 今日趋势" in result
+    assert "## 今日行动建议" in result
+    assert "## 设计灵感（1）" in result
+    assert "## 市场商机（1）" in result
+    assert "## 工艺供应链（1）" in result
+    assert "制作本地文化纹样草案" in result
+    assert "**设计拆解**" in result
+    assert "**原创/IP 提醒**" in result
+    assert "Twitter 本次抓取失败" in result
+
+
 def test_generate_webhook_overview_lists_items_without_full_details():
     summarizer = DailySummarizer()
     items = [_make_item(1), _make_item(2)]

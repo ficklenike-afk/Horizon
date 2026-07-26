@@ -2,11 +2,18 @@
 
 import html
 import re
+from collections import Counter
 from typing import Dict, List, Optional
 from urllib.parse import quote, urlsplit
 
 from ..models import ContentItem
 
+
+CATEGORY_SECTIONS = (
+    ("design-inspiration", "设计灵感"),
+    ("market-opportunity", "市场商机"),
+    ("supply-chain", "工艺供应链"),
+)
 
 _CJK = r"[\u4e00-\u9fff\u3400-\u4dbf]"
 _ASCII = r"[A-Za-z0-9]"
@@ -101,6 +108,7 @@ class DailySummarizer:
         date: str,
         total_fetched: int,
         language: str = "en",
+        source_warnings: Optional[List[str]] = None,
     ) -> str:
         """Generate daily summary in Markdown format.
 
@@ -111,6 +119,7 @@ class DailySummarizer:
             date: Date string (YYYY-MM-DD)
             total_fetched: Total number of items fetched before filtering
             language: Output language, either "en" or "zh"
+            source_warnings: Non-fatal source collection warnings for the Chinese brief
 
         Returns:
             str: Markdown formatted summary
@@ -119,6 +128,15 @@ class DailySummarizer:
 
         if not items:
             return self._generate_empty_summary(date, total_fetched, labels)
+
+        if language == "zh":
+            return self._generate_business_summary(
+                items,
+                date,
+                total_fetched,
+                labels,
+                source_warnings or [],
+            )
 
         header = (
             f"# {labels['header']} - {date}\n\n"
@@ -190,6 +208,86 @@ class DailySummarizer:
         prefix = f"第 {index}/{total} 条\n\n" if language == "zh" else f"Item {index}/{total}\n\n"
         return prefix + self._format_item(item, labels, language, index).rstrip("-\n ")
 
+    def _render_trends(self, items: List[ContentItem]) -> str:
+        counter = Counter(tag for item in items for tag in item.ai_tags)
+        lines = ["## 今日趋势", ""]
+        for tag, count in counter.most_common(5):
+            representative = next(item for item in items if tag in item.ai_tags)
+            title = representative.metadata.get("title_zh") or representative.title
+            safe_title = _pangu(_escape_markdown(title))
+            url = _safe_url(representative.url)
+            title_link = f"[{safe_title}]({url})" if url else safe_title
+            lines.append(f"- **{_escape_markdown(tag)}**（{count} 条）：{title_link}")
+        if len(lines) == 2:
+            lines.append("- 今日入选内容尚未形成重复趋势标签。")
+        return "\n".join(lines) + "\n\n"
+
+    def _render_actions(self, items: List[ContentItem]) -> str:
+        ranked = sorted(items, key=lambda item: item.ai_score or 0, reverse=True)
+        actions = [
+            item.metadata["recommended_action_zh"]
+            for item in ranked
+            if item.metadata.get("recommended_action_zh")
+        ][:3]
+        lines = ["## 今日行动建议", ""]
+        lines.extend(
+            f"{index}. {_pangu(_escape_markdown(action))}"
+            for index, action in enumerate(actions, 1)
+        )
+        if not actions:
+            lines.append("1. 今日暂无足够明确的立即行动建议。")
+        return "\n".join(lines) + "\n\n"
+
+    def _generate_business_summary(
+        self,
+        items: List[ContentItem],
+        date: str,
+        total_fetched: int,
+        labels: Dict[str, str],
+        source_warnings: List[str],
+    ) -> str:
+        counts = Counter(
+            str(item.metadata.get("category", "unclassified")) for item in items
+        )
+        parts = [
+            f"# 篮球球衣商业情报 - {date}\n\n",
+            f"> {labels['selected_items'].format(total=total_fetched, selected=len(items))}\n\n",
+            f"> 其中高价值情报按业务方向分为："
+            f"设计 {counts['design-inspiration']} 条、"
+            f"商机 {counts['market-opportunity']} 条、"
+            f"供应链 {counts['supply-chain']} 条。\n\n",
+        ]
+        if source_warnings:
+            parts.append("### 来源提示\n\n")
+            parts.extend(
+                f"- {_pangu(_escape_markdown(warning))}\n"
+                for warning in source_warnings
+            )
+            parts.append("\n")
+        parts.append(self._render_trends(items))
+        parts.append(self._render_actions(items))
+        for category, label in CATEGORY_SECTIONS:
+            section_items = [
+                item for item in items if item.metadata.get("category") == category
+            ]
+            parts.append(f"## {label}（{len(section_items)}）\n\n")
+            if not section_items:
+                parts.append("今日暂无达到阈值的内容。\n\n")
+                continue
+            for index, item in enumerate(section_items, 1):
+                parts.append(self._format_item(item, labels, "zh", index))
+        unclassified_items = [
+            item
+            for item in items
+            if item.metadata.get("category")
+            not in {category for category, _ in CATEGORY_SECTIONS}
+        ]
+        if unclassified_items:
+            parts.append(f"## 未分类（{len(unclassified_items)}）\n\n")
+            for index, item in enumerate(unclassified_items, 1):
+                parts.append(self._format_item(item, labels, "zh", index))
+        return "".join(parts)
+
     def _format_item(self, item: ContentItem, labels: dict, language: str, index: int) -> str:
         """Format a single ContentItem into Markdown."""
         _title = item.metadata.get(f"title_{language}") or item.title
@@ -258,6 +356,20 @@ class DailySummarizer:
             "",
             source_line,
         ]
+
+        business_fields = (
+            ("design_breakdown_zh", "设计拆解"),
+            ("business_value_zh", "业务价值"),
+            ("recommended_action_zh", "建议行动"),
+            ("ip_risk_zh", "原创/IP 提醒"),
+        )
+        if language == "zh":
+            for key, label in business_fields:
+                value = meta.get(key)
+                if value:
+                    lines.extend(
+                        ["", f"**{label}**：{_pangu(_escape_markdown(value))}"]
+                    )
 
         if background:
             lines.append("")
