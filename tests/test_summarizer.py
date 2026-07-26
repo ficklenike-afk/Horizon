@@ -1,6 +1,7 @@
 """Unit tests for daily summary rendering."""
 
 import asyncio
+import re
 from datetime import datetime, timezone
 
 from src.ai.summarizer import DailySummarizer
@@ -77,6 +78,45 @@ def test_generate_summary_zh_groups_business_sections_and_actions():
     assert "**设计拆解**" in result
     assert "**原创/IP 提醒**" in result
     assert "Twitter 本次抓取失败" in result
+
+
+def test_generate_summary_zh_nests_grouped_items_under_business_sections():
+    summarizer = DailySummarizer()
+    items = [
+        _business_item(1, "design-inspiration", "城市文化", "制作设计草案。"),
+        _business_item(2, "market-opportunity", "校园篮球", "建立客户清单。"),
+    ]
+
+    result = _run_async(
+        summarizer.generate_summary(items, "2026-07-26", 2, language="zh")
+    )
+
+    assert "## 设计灵感（1）" in result
+    assert "### [中文标题 1](https://example.com/items/1)" in result
+    assert not re.search(
+        r"(?m)^## \[中文标题 1\]\(https://example\.com/items/1\)", result
+    )
+
+
+def test_generate_summary_zh_uses_unique_category_aware_item_anchors():
+    summarizer = DailySummarizer()
+    items = [
+        _business_item(1, "design-inspiration", "城市文化", "制作设计草案。"),
+        _business_item(2, "market-opportunity", "校园篮球", "建立客户清单。"),
+        _business_item(3, "supply-chain", "热升华", "索取测试样。"),
+        _business_item(4, None, "球迷文化", "记录需求。"),
+    ]
+
+    result = _run_async(
+        summarizer.generate_summary(items, "2026-07-26", 4, language="zh")
+    )
+
+    assert re.findall(r'<a id="([^"]+)"></a>', result) == [
+        "item-design-inspiration-1",
+        "item-market-opportunity-1",
+        "item-supply-chain-1",
+        "item-unclassified-1",
+    ]
 
 
 def test_generate_webhook_overview_lists_items_without_full_details():

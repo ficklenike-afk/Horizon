@@ -275,7 +275,16 @@ class DailySummarizer:
                 parts.append("今日暂无达到阈值的内容。\n\n")
                 continue
             for index, item in enumerate(section_items, 1):
-                parts.append(self._format_item(item, labels, "zh", index))
+                parts.append(
+                    self._format_item(
+                        item,
+                        labels,
+                        "zh",
+                        index,
+                        heading_level=3,
+                        anchor=f"item-{category}-{index}",
+                    )
+                )
         unclassified_items = [
             item
             for item in items
@@ -285,10 +294,27 @@ class DailySummarizer:
         if unclassified_items:
             parts.append(f"## 未分类（{len(unclassified_items)}）\n\n")
             for index, item in enumerate(unclassified_items, 1):
-                parts.append(self._format_item(item, labels, "zh", index))
+                parts.append(
+                    self._format_item(
+                        item,
+                        labels,
+                        "zh",
+                        index,
+                        heading_level=3,
+                        anchor=f"item-unclassified-{index}",
+                    )
+                )
         return "".join(parts)
 
-    def _format_item(self, item: ContentItem, labels: dict, language: str, index: int) -> str:
+    def _format_item(
+        self,
+        item: ContentItem,
+        labels: dict,
+        language: str,
+        index: int,
+        heading_level: int = 2,
+        anchor: Optional[str] = None,
+    ) -> str:
         """Format a single ContentItem into Markdown."""
         _title = item.metadata.get(f"title_{language}") or item.title
         title = _escape_markdown(_title)
@@ -348,14 +374,19 @@ class DailySummarizer:
 
         title_link = f"[{title}]({url})" if url else title
 
+        anchor = anchor or f"item-{index}"
+        heading = "#" * heading_level
         lines = [
-            f'<a id="item-{index}"></a>',
+            f'<a id="{anchor}"></a>',
             f"## {title_link} \u2b50\ufe0f {score}/10",  # ⭐️
             "",
             summary,
             "",
             source_line,
         ]
+
+        if heading_level != 2:
+            lines[1] = f"{heading} {title_link} \u2b50\ufe0f {score}/10"
 
         business_fields = (
             ("design_breakdown_zh", "设计拆解"),
