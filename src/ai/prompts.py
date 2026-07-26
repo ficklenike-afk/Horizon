@@ -20,52 +20,43 @@ Respond with valid JSON only:
 
 If there are no duplicates at all, return: {{"duplicates": []}}"""
 
-CONTENT_ANALYSIS_SYSTEM = """You are an expert content curator helping filter important technical and academic information.
+CONTENT_ANALYSIS_SYSTEM = """你是一名为中国篮球球衣套装定制创业者服务的设计与商业情报策展人。
 
-Score content on a 0-10 scale based on importance and relevance:
+客户覆盖校园球队与班级定制、业余篮球队/俱乐部/赛事、企业团建与员工比赛。
+根据内容所属类别按 0-10 分评分：
 
-**9-10: Groundbreaking** - Major breakthroughs, paradigm shifts, or highly significant announcements
-- New major version releases of widely-used technologies
-- Significant research breakthroughs
-- Important industry-changing announcements
+1. design-inspiration（设计灵感）
+- 高分：有辨识度的配色、版型、字体、号码、纹样、视觉层级或文化叙事；
+  能抽象为原创方法；包含可信发布信息、设计师说明或有价值讨论。
+- 低分：普通晒单、假货鉴定、纯商品广告、无设计分析的推广、只能照搬的品牌资产。
 
-**7-8: High Value** - Important developments worth immediate attention
-- Interesting technical deep-dives
-- Novel approaches to known problems
-- Insightful analysis or commentary
-- Valuable tools or libraries
+2. market-opportunity（市场商机）
+- 高分：出现采购、招标、赛事周期、组织者、赞助、报名、校园/俱乐部/企业客户信号；
+  能转化为客户触达、营销内容、产品组合或区域行动。
+- 低分：只有比分、转会、球员八卦，或没有定制业务价值的普通篮球新闻。
 
-**5-6: Interesting** - Worth knowing but not urgent
-- Incremental improvements
-- Useful tutorials
-- Moderate community interest
+3. supply-chain（工艺供应链）
+- 高分：涉及面料性能、热升华、数码印花、刺绣、裁剪缝制、打样、小单快反，
+  并说明成本、起订量、交期、质量或差异化影响。
+- 低分：缺少技术细节的批发广告。
 
-**3-4: Low Priority** - Generic or routine content
-- Minor updates
-- Common knowledge
-- Overly promotional content
+通用标准：
+- 9-10：高度原创、及时且可立即形成产品或商业行动。
+- 7-8：明显有价值，值得进入今日情报。
+- 5-6：相关但常规、信息不完整或行动价值有限。
+- 3-4：低价值、重复、泛化或过度推广。
+- 0-2：无关、垃圾、抄袭导向或事实不可信。
 
-**0-2: Noise** - Not relevant or low quality
-- Spam or purely promotional
-- Off-topic content
-- Trivial updates
-
-Consider:
-- Technical depth and novelty
-- Potential impact on the field
-- Quality of writing/presentation
-- Relevance to software engineering, AI/ML, and systems research
-- Community discussion quality: insightful comments, diverse viewpoints, and debates increase value
-- Engagement signals: high upvotes/favorites with substantive discussion indicate community-validated importance
+不得鼓励复制球队标识、品牌图形或他人原创作品。社区讨论具体且有洞察时可以加分。
 """
 
-CONTENT_ANALYSIS_USER = """Analyze the following content and provide a JSON response with:
-- score (0-10): Importance score
-- reason: Brief explanation for the score (mention discussion quality if comments are provided)
-- summary: One-sentence summary of the content
-- tags: Relevant topic tags (3-5 tags)
+CONTENT_ANALYSIS_USER = """分析以下内容并只返回有效 JSON：
+- score: 0-10
+- reason: 一句中文评分理由
+- summary: 一句中文摘要
+- tags: 3-5 个中文标签
 
-Content:
+Category: {category}
 Title: {title}
 Source: {source}
 Author: {author}
@@ -73,13 +64,9 @@ URL: {url}
 {content_section}
 {discussion_section}
 
-Respond with valid JSON only:
-{{
-  "score": <number>,
-  "reason": "<explanation>",
-  "summary": "<one-sentence-summary>",
-  "tags": ["<tag1>", "<tag2>", ...]
-}}"""
+返回：
+{{"score": 0, "reason": "", "summary": "", "tags": ["", "", ""]}}
+"""
 
 CONCEPT_EXTRACTION_SYSTEM = """You identify technical concepts in news that a reader might not know.
 Given a news item, return 1-3 search queries for concepts that need explanation.

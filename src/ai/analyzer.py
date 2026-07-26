@@ -62,6 +62,7 @@ class ContentAnalyzer:
                     await self._analyze_item(item)
                 except Exception as e:
                     print(f"Error analyzing item {item.id}: {e}")
+                    item.metadata["analysis_failed"] = True
                     item.ai_score = 0.0
                     item.ai_reason = "Analysis failed"
                     item.ai_summary = item.title
@@ -141,6 +142,7 @@ class ContentAnalyzer:
 
         # Generate user prompt
         user_prompt = CONTENT_ANALYSIS_USER.format(
+            category=item.metadata.get("category", "unclassified"),
             title=item.title,
             source=f"{item.source_type.value}",
             author=item.author or "Unknown",
@@ -163,6 +165,7 @@ class ContentAnalyzer:
             result = None
         if result is None:
             print(f"Warning: could not parse analysis response for {item.id}, using defaults")
+            item.metadata["analysis_failed"] = True
             item.ai_score = 0.0
             item.ai_reason = "Analysis response parse failed"
             item.ai_summary = item.title
@@ -170,6 +173,7 @@ class ContentAnalyzer:
             return
 
         # Update item with analysis results
+        item.metadata["analysis_failed"] = False
         item.ai_score = result.score
         item.ai_reason = result.reason
         item.ai_summary = result.summary
