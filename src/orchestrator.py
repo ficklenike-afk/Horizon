@@ -1,11 +1,14 @@
 """Main orchestrator coordinating the entire workflow."""
 
 import asyncio
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional
 from urllib.parse import unquote_plus, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 import httpx
 from rich.console import Console
 
@@ -29,6 +32,12 @@ from .ai.analyzer import ContentAnalyzer
 from .ai.summarizer import DailySummarizer
 from .ai.enricher import ContentEnricher
 from .ai.tokens import get_usage_snapshot
+from .services.publication_validator import (
+    redact_runtime_secrets,
+    validate_analysis_health,
+    validate_markdown,
+    validate_selected_items,
+)
 
 
 _TRACKING_QUERY_PARAMETERS = {
@@ -45,6 +54,12 @@ _TRACKING_QUERY_PARAMETERS = {
     "twclid",
     "vero_id",
 }
+
+try:
+    _SHANGHAI_TIMEZONE = ZoneInfo("Asia/Shanghai")
+except ZoneInfoNotFoundError:
+    # Windows does not ship an IANA timezone database; modern Shanghai is UTC+8.
+    _SHANGHAI_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 def _deduplication_url_key(url: str) -> tuple[str, str, str, str, Optional[int], str, str]:
@@ -161,6 +176,23 @@ class FetchReport:
         }
 
 
+def build_source_warnings(report: Optional[FetchReport]) -> List[str]:
+    """Build safe public warnings without including source error details."""
+    if report is None:
+        return []
+    warnings = [
+        f"{outcome.source_name} 本次抓取失败，其他来源继续运行。"
+        for outcome in report.outcomes
+        if outcome.status == "failure"
+    ]
+    if any(
+        outcome.source_name == "Twitter" and outcome.status == "empty"
+        for outcome in report.outcomes
+    ):
+        warnings.append("Twitter 本次未抓取到新内容，其他来源继续运行。")
+    return warnings
+
+
 class HorizonOrchestrator:
     """Orchestrates the complete workflow for content aggregation and analysis."""
 
@@ -226,6 +258,7 @@ class HorizonOrchestrator:
 
             # 4. Analyze with AI
             analyzed_items = await self._analyze_content(merged_items)
+            validate_analysis_health(analyzed_items)
             self.console.print(f"🤖 Analyzed {len(analyzed_items)} items with AI\n")
 
             # 5. Filter, deduplicate, and balance the digest
@@ -252,12 +285,29 @@ class HorizonOrchestrator:
 
             # 6. Search related stories + enrich with background knowledge (2nd AI pass)
             await self._enrich_important_items(important_items)
+            if self.config.ai.languages:
+                validate_selected_items(important_items)
 
             # 7. Generate and save daily summaries for each configured language
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            source_warnings = build_source_warnings(self.last_fetch_report)
+            today = datetime.now(_SHANGHAI_TIMEZONE).strftime("%Y-%m-%d")
             for lang in self.config.ai.languages:
                 summarizer = DailySummarizer()
-                summary = await summarizer.generate_summary(important_items, today, len(all_items), language=lang)
+                summary = await summarizer.generate_summary(
+                    important_items,
+                    today,
+                    len(all_items),
+                    language=lang,
+                    source_warnings=source_warnings,
+                )
+                validate_markdown(
+                    summary,
+                    [
+                        os.getenv("DEEPSEEK_API_KEY", ""),
+                        os.getenv("APIFY_TOKEN", ""),
+                    ],
+                    language=lang,
+                )
 
                 # Save to data/summaries/
                 summary_path = self.storage.save_daily_summary(today, summary, language=lang)
@@ -296,7 +346,8 @@ class HorizonOrchestrator:
 
                     self.console.print(f"📄 Copied {lang.upper()} summary to GitHub Pages: {dest_path}\n")
                 except Exception as e:
-                    self.console.print(f"[yellow]⚠️  Failed to copy {lang.upper()} summary to docs/: {e}[/yellow]\n")
+                    error = redact_runtime_secrets(e)
+                    self.console.print(f"[yellow]⚠️  Failed to copy {lang.upper()} summary to docs/: {error}[/yellow]\n")
 
                 # Send email if configured
                 if self.email_manager and self.config.email and self.config.email.enabled:
@@ -333,13 +384,14 @@ class HorizonOrchestrator:
                     )
 
         except Exception as e:
-            self.console.print(f"[bold red]❌ Error: {e}[/bold red]")
+            error_message = redact_runtime_secrets(e)
+            self.console.print(f"[bold red]❌ Error: {error_message}[/bold red]")
 
             # Send webhook failure notification if configured
             if self.webhook_notifier:
                 await self.webhook_notifier.send_failure(
                     date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                    error_message=str(e),
+                    error_message=error_message,
                 )
 
             raise
@@ -454,7 +506,7 @@ class HorizonOrchestrator:
         try:
             items = await scraper.fetch(since)
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = f"{type(exc).__name__}: {redact_runtime_secrets(exc)}"
             self.console.print(f"[red]   Failed to fetch {name}: {error}[/red]")
             return SourceFetchOutcome(
                 source_name=name,
@@ -597,7 +649,8 @@ class HorizonOrchestrator:
             duplicate_groups = result.get("duplicates", [])
         except Exception as e:
             if log:
-                self.console.print(f"[yellow]  dedup: AI call failed ({e}), skipping[/yellow]")
+                error = redact_runtime_secrets(e)
+                self.console.print(f"[yellow]  dedup: AI call failed ({error}), skipping[/yellow]")
             return items
 
         if not duplicate_groups:
@@ -834,8 +887,9 @@ class HorizonOrchestrator:
                             f"   💬 {len(reply_lines)} replies added to: {item.title[:60]}"
                         )
                 except Exception as exc:
+                    error = redact_runtime_secrets(exc)
                     self.console.print(
-                        f"   [yellow]⚠️  Reply fetch failed for {item.id}: {exc}[/yellow]"
+                        f"   [yellow]⚠️  Reply fetch failed for {item.id}: {error}[/yellow]"
                     )
 
         if not expanded:
