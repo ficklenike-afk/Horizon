@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from rich.console import Console
@@ -66,6 +66,48 @@ class StubScraper:
         if self.error:
             raise self.error
         return self.result
+
+
+@pytest.mark.parametrize("analysis_result", ["empty", "all_failed"])
+def test_languages_empty_skips_analysis_publication_validation(
+    monkeypatch,
+    analysis_result: str,
+) -> None:
+    orchestrator = make_orchestrator()
+    orchestrator.config = SimpleNamespace(  # type: ignore[assignment]
+        email=None,
+        filtering=SimpleNamespace(time_window_hours=24),
+        ai=SimpleNamespace(languages=[]),
+    )
+    orchestrator.email_manager = None
+    orchestrator.webhook_notifier = None
+
+    source_item = make_item("source")
+    analyzed_items = [] if analysis_result == "empty" else [make_item("failed")]
+    if analyzed_items:
+        analyzed_items[0].metadata["analysis_failed"] = True
+
+    orchestrator.fetch_all_sources = AsyncMock(return_value=[source_item])  # type: ignore[method-assign]
+    orchestrator.merge_cross_source_duplicates = Mock(return_value=[source_item])  # type: ignore[method-assign]
+    orchestrator._analyze_content = AsyncMock(return_value=analyzed_items)  # type: ignore[method-assign]
+    orchestrator.filter_items = AsyncMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(items=[])
+    )
+    orchestrator._expand_twitter_discussion = AsyncMock()  # type: ignore[method-assign]
+    orchestrator.apply_balanced_digest = Mock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(items=[])
+    )
+    orchestrator._enrich_important_items = AsyncMock()  # type: ignore[method-assign]
+
+    analysis_validator = Mock()
+    monkeypatch.setattr(
+        "src.orchestrator.validate_analysis_health",
+        analysis_validator,
+    )
+
+    asyncio.run(orchestrator.run())
+
+    analysis_validator.assert_not_called()
 
 
 def test_all_success_empty_has_normal_success_report(monkeypatch) -> None:

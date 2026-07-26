@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.check_runtime_secrets import scan_tree_for_values
+from scripts.check_runtime_secrets import main, scan_tree_for_values
 
 
 def test_secret_scan_reports_relative_path_without_echoing_value(tmp_path: Path) -> None:
@@ -58,3 +58,29 @@ def test_secret_scan_checks_generic_cache_directory(tmp_path: Path) -> None:
     leaked.write_text(secret, encoding="utf-8")
 
     assert scan_tree_for_values(tmp_path, [secret]) == [Path("cache/leak.txt")]
+
+
+def test_secret_scan_cli_redacts_secret_embedded_in_finding_path(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    secret = "runtime-secret-value"
+    leaked = (
+        tmp_path
+        / f"directory-{secret}"
+        / f"leak-{secret}.txt"
+    )
+    leaked.parent.mkdir()
+    leaked.write_text(secret, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APIFY_TOKEN", secret)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    exit_code = main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Runtime secret value found" in output
+    assert "[REDACTED]" in output
+    assert secret not in output

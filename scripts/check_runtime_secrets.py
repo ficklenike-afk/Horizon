@@ -3,7 +3,10 @@
 import os
 from pathlib import Path
 
-from src.services.publication_validator import contains_secret_value
+from src.services.publication_validator import (
+    contains_secret_value,
+    redact_runtime_secrets,
+)
 
 
 EXCLUDED_PARTS = {
@@ -47,7 +50,7 @@ def main() -> int:
     if findings:
         print("Runtime secret value found in tracked workspace files:")
         for path in findings:
-            print(f"- {path}")
+            print(f"- {redact_runtime_secrets(path)}")
         return 1
     print("Runtime secret scan passed.")
     return 0

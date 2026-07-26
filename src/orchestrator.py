@@ -258,7 +258,8 @@ class HorizonOrchestrator:
 
             # 4. Analyze with AI
             analyzed_items = await self._analyze_content(merged_items)
-            validate_analysis_health(analyzed_items)
+            if self.config.ai.languages:
+                validate_analysis_health(analyzed_items)
             self.console.print(f"🤖 Analyzed {len(analyzed_items)} items with AI\n")
 
             # 5. Filter, deduplicate, and balance the digest
