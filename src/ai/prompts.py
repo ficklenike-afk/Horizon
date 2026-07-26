@@ -68,25 +68,52 @@ URL: {url}
 {{"score": 0, "reason": "", "summary": "", "tags": ["", "", ""]}}
 """
 
-CONCEPT_EXTRACTION_SYSTEM = """You identify technical concepts in news that a reader might not know.
-Given a news item, return 1-3 search queries for concepts that need explanation.
-Focus on: specific technologies, protocols, algorithms, tools, or projects that are not widely known.
-Do NOT return queries for well-known things (e.g. "Python", "Linux", "Google").
-If the news is self-explanatory, return an empty list."""
+CONCEPT_EXTRACTION_SYSTEM = """识别篮球球衣设计、市场商机或运动服工艺中需要补充背景的专有概念。
+只返回内容明确提到、且解释后能帮助中国篮球服定制创业者判断价值的 0-3 个检索词。"""
 
-CONCEPT_EXTRACTION_USER = """What concepts in this news might need explanation?
+CONCEPT_EXTRACTION_USER = """标题：{title}
+摘要：{summary}
+标签：{tags}
+内容：{content}
+只返回有效 JSON：{{"queries": ["", ""]}}"""
 
-Title: {title}
-Summary: {summary}
-Tags: {tags}
-Content: {content}
+CONTENT_ENRICHMENT_SYSTEM = """你是一名中国篮球球衣设计与定制业务分析师。
+只使用内容本身和给定检索结果，不得编造。所有文本字段必须使用简体中文。
+设计类要拆解配色、版型、字体、号码、纹样、视觉层级和文化叙事；
+商机类要说明客户、时机、地点、需求信号和跟进行动；
+供应链类要说明材料/工艺、质量、成本、起订量、交期和打样建议。
+对球队标识、品牌图形和他人独特作品明确提示知识产权风险。
+sources 只能使用检索结果中原样出现的 URL。"""
 
-Respond with valid JSON only:
+CONTENT_ENRICHMENT_USER = """类别：{category}
+标题：{title}
+链接：{url}
+摘要：{summary}
+评分：{score}/10
+理由：{reason}
+标签：{tags}
+
+正文：
+{content}
+{comments_section}
+
+检索结果：
+{web_context}
+
+只返回有效 JSON：
 {{
-  "queries": ["<search query 1>", "<search query 2>"]
+  "title_zh": "",
+  "whats_new_zh": "",
+  "design_breakdown_zh": "",
+  "business_value_zh": "",
+  "recommended_action_zh": "",
+  "ip_risk_zh": "",
+  "background_zh": "",
+  "community_discussion_zh": "",
+  "sources": []
 }}"""
 
-CONTENT_ENRICHMENT_SYSTEM = """You are a knowledgeable technical writer who helps readers understand important news in context.
+_LEGACY_CONTENT_ENRICHMENT_SYSTEM = """You are a knowledgeable technical writer who helps readers understand important news in context.
 
 Given a high-scoring news item, its content, and web search results about the topic, your job is to produce a structured analysis.
 
@@ -124,7 +151,7 @@ Guidelines:
 - For **sources**: pick 1-3 URLs from the Web Search Results that you actually relied on for the background fields. Only use URLs that appear verbatim in the search results above — do not invent or modify URLs.
 """
 
-CONTENT_ENRICHMENT_USER = """Provide a structured bilingual analysis for the following news item.
+_LEGACY_CONTENT_ENRICHMENT_USER = """Provide a structured bilingual analysis for the following news item.
 
 **News Item:**
 - Title: {title}

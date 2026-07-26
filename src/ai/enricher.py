@@ -174,6 +174,7 @@ class ContentEnricher:
 
         # Step 3: AI generates background grounded in search results
         user_prompt = CONTENT_ENRICHMENT_USER.format(
+            category=item.metadata.get("category", "unclassified"),
             title=item.title,
             url=str(item.url),
             summary=item.ai_summary or item.title,
@@ -199,27 +200,34 @@ class ContentEnricher:
             await self._translate_item(item)
             return
 
-        # Combine structured sub-fields into per-language detailed_summary
-        for lang in ("en", "zh"):
-            if result.get(f"title_{lang}"):
-                val = result[f"title_{lang}"]
-                item.metadata[f"title_{lang}"] = val.get("text") or str(val) if isinstance(val, dict) else str(val)
+        title_zh = result.get("title_zh", "")
+        if title_zh:
+            item.metadata["title_zh"] = str(title_zh)
 
-            parts = []
-            for field in ("whats_new", "why_it_matters", "key_details"):
-                text = result.get(f"{field}_{lang}", "").strip()
-                if text:
-                    parts.append(text)
-            if parts:
-                item.metadata[f"detailed_summary_{lang}"] = " ".join(parts)
+        for field in (
+            "design_breakdown_zh",
+            "business_value_zh",
+            "recommended_action_zh",
+            "ip_risk_zh",
+            "background_zh",
+            "community_discussion_zh",
+        ):
+            value = result.get(field, "")
+            if value:
+                item.metadata[field] = str(value)
 
-            if result.get(f"background_{lang}"):
-                val = result[f"background_{lang}"]
-                item.metadata[f"background_{lang}"] = val.get("text") or str(val) if isinstance(val, dict) else str(val)
-
-            if result.get(f"community_discussion_{lang}"):
-                val = result[f"community_discussion_{lang}"]
-                item.metadata[f"community_discussion_{lang}"] = val.get("text") or str(val) if isinstance(val, dict) else str(val)
+        summary_parts = [
+            str(result.get("whats_new_zh", "")).strip(),
+            str(result.get("business_value_zh", "")).strip(),
+        ]
+        item.metadata["detailed_summary_zh"] = " ".join(
+            part for part in summary_parts if part
+        )
+        item.metadata["detailed_summary"] = item.metadata["detailed_summary_zh"]
+        item.metadata["background"] = item.metadata.get("background_zh", "")
+        item.metadata["community_discussion"] = item.metadata.get(
+            "community_discussion_zh", ""
+        )
 
         # Store citation sources — only URLs that actually came from our search results
         if result.get("sources") and available_urls:
@@ -230,11 +238,6 @@ class ContentEnricher:
             ]
             if valid:
                 item.metadata["sources"] = valid
-
-        # Backward-compatible fallback fields (English as default)
-        item.metadata["detailed_summary"] = item.metadata.get("detailed_summary_en", "")
-        item.metadata["background"] = item.metadata.get("background_en", "")
-        item.metadata["community_discussion"] = item.metadata.get("community_discussion_en", "")
 
     async def _translate_item(self, item: ContentItem) -> None:
         """Lightweight translation fallback: when full enrichment fails, at least
